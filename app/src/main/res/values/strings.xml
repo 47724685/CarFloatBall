@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">悬浮球</string>
+    <string name="accessibility_service_desc">悬浮球：返回/回桌面手势</string>
+</resources>
