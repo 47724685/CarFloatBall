@@ -1,6 +1,7 @@
 package com.yourpackage.floatball
 
 import android.animation.ValueAnimator
+import android.app.ActivityManager
 import android.app.Service
 import android.content.Intent
 import android.graphics.Color
@@ -10,7 +11,6 @@ import android.os.IBinder
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 
@@ -18,11 +18,18 @@ import android.widget.TextView
  * 悬浮球本体：Service + WindowManager叠加层，不是Activity，
  * 不会被任何ROM的横竖屏锁影响。
  *
- * 装好后需要的两条授权（跟简悬浮一样的流程）：
+ * 新方案：不再依赖 AccessibilityService / performGlobalAction，
+ * 因为航盛这台ROM会在几秒内自动重置 enabled_accessibility_services，
+ * 而且 system 级的 systemsetting provider 是签名权限保护的，三方App写不进去，
+ * 这条路在这台机器上走不通。
+ *
+ * 改用任务栈管理（REORDER_TASKS/GET_TASKS是普通权限，不需要ROM特殊授权）：
+ *   - "返回桌面" 用 ACTION_MAIN + CATEGORY_HOME 的 Intent 跳转
+ *   - "退出当前App" 优先尝试 am force-stop（需要shell权限，部分机型可用），
+ *     不行就退化为跳转桌面
+ *
+ * 装好后唯一需要的授权：
  *   adb shell appops set com.yourpackage.floatball SYSTEM_ALERT_WINDOW allow
- *   adb shell settings put secure enabled_accessibility_services \
- *       com.yourpackage.floatball/com.yourpackage.floatball.BackAccessibilityService
- *   adb shell settings put secure accessibility_enabled 1
  */
 class FloatBallService : Service() {
 
@@ -52,13 +59,63 @@ class FloatBallService : Service() {
         addFloatBall()
     }
 
+    /** 单击：退出当前App（优先force-stop，失败则退化为回桌面） */
+    private fun exitCurrentApp() {
+        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val topPackage = getTopPackageName(am)
+
+        if (topPackage != null && topPackage != packageName) {
+            val killed = tryForceStop(topPackage)
+            if (killed) return
+        }
+        // force-stop不可用（没有shell权限）时，退化为跳桌面
+        goHome()
+    }
+
+    /** 长按：直接回桌面，等价于过去的 GLOBAL_ACTION_HOME */
+    private fun goHome() {
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * 需要 GET_TASKS 权限。在 Android 5.0+ getRunningTasks 已被限制只能看到自己的任务，
+     * 但这台车机是 Android 4.4.3（API 19），限制还没加上，getRunningTasks 仍然有效。
+     */
+    @Suppress("DEPRECATION")
+    private fun getTopPackageName(am: ActivityManager): String? {
+        return try {
+            val tasks = am.getRunningTasks(1)
+            tasks.firstOrNull()?.topActivity?.packageName
+        } catch (e: SecurityException) {
+            null
+        }
+    }
+
+    /**
+     * 通过shell调用 am force-stop。普通三方App签名在大多数车机上没有shell权限会直接抛异常，
+     * 如果你的APK是system签名或者设备本身允许，这里能直接生效。
+     */
+    private fun tryForceStop(targetPackage: String): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("am", "force-stop", targetPackage))
+            process.waitFor()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
     private fun setupGestureDetector() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                BackAccessibilityService.instance?.doBack()
+                exitCurrentApp()
                 return true
             }
 
@@ -68,7 +125,7 @@ class FloatBallService : Service() {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                BackAccessibilityService.instance?.doHome()
+                goHome()
             }
         })
     }

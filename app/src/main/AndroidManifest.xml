@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+    <uses-permission android:name="android.permission.GET_TASKS" />
 
     <application
         android:label="悬浮球"
@@ -24,18 +26,6 @@
         <service
             android:name=".FloatBallService"
             android:exported="false" />
-
-        <service
-            android:name=".BackAccessibilityService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice.config"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
 
         <receiver
             android:name=".BootReceiver"
